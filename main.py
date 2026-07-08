@@ -1,4 +1,3 @@
-
 import streamlit as st
 
 st.set_page_config(page_title="내신 계산기 - 학업 설계서", page_icon=None, layout="wide")
@@ -10,7 +9,7 @@ st.set_page_config(page_title="내신 계산기 - 학업 설계서", page_icon=N
 # ============================================================================
 
 CURRICULA = {
-    "2학년 (2025학년도 입학생)": {
+    "2025년 신입생": {
         "학교 지정 과목": {
             "2학년 1학기 (2026년)": [("문학", 4), ("대수", 4), ("영어Ⅰ", 4), ("스포츠 생활1", 2)],
             "2학년 2학기 (2026년)": [("화법과 언어", 4), ("미적분Ⅰ", 4), ("영어Ⅱ", 4), ("스포츠 생활2", 2)],
@@ -93,7 +92,7 @@ CURRICULA = {
             },
         },
     },
-    "1학년 (2026학년도 입학생)": {
+    "2026년 신입생": {
         "학교 지정 과목": {
             "2학년 1학기 (2027년)": [("문학", 4), ("대수", 4), ("영어Ⅰ", 4), ("스포츠 생활1", 2)],
             "2학년 2학기 (2027년)": [("화법과 언어", 4), ("미적분Ⅰ", 4), ("영어Ⅱ", 4), ("스포츠 생활2", 2)],
@@ -200,19 +199,24 @@ def grade_input(key, label, credit):
 def render_semester(version, semester_label, fixed_courses, elective_data, totals):
     st.subheader(semester_label)
 
+    semester_totals = {"weighted": 0.0, "credit": 0.0}
+    selected_rows = []  # (과목명, 학점, 등급) - 이번 학기에 반영된 모든 과목
+
     st.markdown("**학교 지정 과목**")
     for name, credit in fixed_courses:
         key = f"{version}|{semester_label}|fixed|{name}"
         credit_v, grade = grade_input(key, name, credit)
-        totals["weighted"] += credit_v * grade
-        totals["credit"] += credit_v
+        semester_totals["weighted"] += credit_v * grade
+        semester_totals["credit"] += credit_v
+        selected_rows.append((name, credit_v, grade))
 
     st.markdown("**학교 선택 과목 · 단일 선택**")
     for subject, name, credit in elective_data["단일 선택"]:
         key = f"{version}|{semester_label}|single|{subject}|{name}"
         credit_v, grade = grade_input(key, f"[{subject}] {name}", credit)
-        totals["weighted"] += credit_v * grade
-        totals["credit"] += credit_v
+        semester_totals["weighted"] += credit_v * grade
+        semester_totals["credit"] += credit_v
+        selected_rows.append((f"[{subject}] {name}", credit_v, grade))
 
     for group in elective_data["그룹"]:
         st.markdown(f"**{group['label']}**")
@@ -231,13 +235,33 @@ def render_semester(version, semester_label, fixed_courses, elective_data, total
                         "등급", min_value=0.0, max_value=9.0, step=0.1,
                         value=DEFAULT_GRADE, key=grade_key, label_visibility="collapsed",
                     )
-                    totals["weighted"] += credit * grade
-                    totals["credit"] += credit
+                    semester_totals["weighted"] += credit * grade
+                    semester_totals["credit"] += credit
                     checked_count += 1
+                    selected_rows.append((name, credit, grade))
                 else:
                     st.write("")
         if checked_count != group["pick"]:
             st.caption(f"{group['label']} — 현재 {checked_count}개 선택됨 (기준: {group['pick']}개)")
+
+    st.markdown("**이번 학기 선택 과목 · 내신 요약**")
+    if selected_rows:
+        st.table(
+            {
+                "과목": [r[0] for r in selected_rows],
+                "학점": [r[1] for r in selected_rows],
+                "등급": [r[2] for r in selected_rows],
+            }
+        )
+        semester_gpa = semester_totals["weighted"] / semester_totals["credit"]
+        col1, col2 = st.columns(2)
+        col1.metric("이번 학기 이수 학점", f"{semester_totals['credit']:.0f}")
+        col2.metric("이번 학기 내신", f"{semester_gpa:.2f}")
+    else:
+        st.info("반영된 과목이 없습니다.")
+
+    totals["weighted"] += semester_totals["weighted"]
+    totals["credit"] += semester_totals["credit"]
 
     st.markdown("---")
 
@@ -248,11 +272,12 @@ def render_semester(version, semester_label, fixed_courses, elective_data, total
 
 st.title("학업 설계서 내신 계산기")
 
-version = st.radio("학년 선택", list(CURRICULA.keys()), horizontal=True)
+version = st.radio("신입생 연도 선택", list(CURRICULA.keys()), horizontal=True)
 
 st.caption(
     "과목마다 등급(내신) 기본값은 1.0으로 되어 있습니다. "
-    "선택 과목은 체크하면 등급 입력창이 나타나고, 전체 학기에 걸쳐 학점 가중 평균으로 총 내신을 계산합니다."
+    "선택 과목은 체크하면 등급 입력창이 나타나고, 학기별로 선택한 과목과 내신이 표로 정리되며, "
+    "맨 아래에서 4개 학기를 합산한 총 내신을 계산합니다."
 )
 
 data = CURRICULA[version]
@@ -260,10 +285,10 @@ totals = {"weighted": 0.0, "credit": 0.0}
 
 for semester_label, fixed_courses in data["학교 지정 과목"].items():
     elective_data = data["학교 선택 과목"][semester_label]
-    with st.expander(semester_label, expanded=False):
+    with st.expander(semester_label, expanded=True):
         render_semester(version, semester_label, fixed_courses, elective_data, totals)
 
-st.header("총 내신")
+st.header("4개 학기 총 내신")
 if totals["credit"] > 0:
     overall = totals["weighted"] / totals["credit"]
     col1, col2 = st.columns(2)
